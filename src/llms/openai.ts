@@ -79,8 +79,50 @@ export function llmOpenAI(cfg: OpenAIConfig): LLMHandle {
       
       return r.choices?.[0]?.message?.content ?? "";
     },
-    genWithTools: async (prompt: string, tools: ToolDefinition[]): Promise<LLMToolResult> => {
+    genWithTools: async (prompt: string, tools: ToolDefinition[], onToken?: (token: string) => void): Promise<LLMToolResult> => {
       const { nameMap, formattedTools} = createOpenAICompatibleTools(tools);
+
+      // Streaming path: forward text deltas to onToken and reconstruct tool
+      // calls from the streamed deltas. This lets the final answer stream
+      // token-by-token even while tools are available.
+      if (onToken) {
+        const stream = await client.chat.completions.create({
+          model,
+          messages: [{ role: "user", content: prompt }],
+          tools: formattedTools,
+          tool_choice: "auto",
+          stream: true,
+          stream_options: { include_usage: true },
+          ...options,
+        });
+
+        let content = "";
+        const toolAcc = new Map<number, { id: string; type: "function"; function: { name: string; arguments: string } }>();
+        for await (const chunk of stream as any) {
+          lastUsage = normalizeTokenUsage(chunk?.usage) || lastUsage;
+          const delta = chunk?.choices?.[0]?.delta;
+          if (typeof delta?.content === "string" && delta.content.length > 0) {
+            content += delta.content;
+            onToken(delta.content);
+          }
+          for (const tc of delta?.tool_calls ?? []) {
+            const idx = tc.index ?? 0;
+            const cur = toolAcc.get(idx) ?? { id: "", type: "function" as const, function: { name: "", arguments: "" } };
+            if (tc.id) cur.id = tc.id;
+            if (tc.function?.name) cur.function.name += tc.function.name;
+            if (tc.function?.arguments) cur.function.arguments += tc.function.arguments;
+            toolAcc.set(idx, cur);
+          }
+        }
+
+        const message = {
+          content: content || null,
+          tool_calls: toolAcc.size ? Array.from(toolAcc.values()) : undefined,
+        };
+        const result = parseOpenAICompatibleResponse(message, nameMap);
+        result.usage = lastUsage || undefined;
+        return result;
+      }
 
       const r = await client.chat.completions.create({
         model,

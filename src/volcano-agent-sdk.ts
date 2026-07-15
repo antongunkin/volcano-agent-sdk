@@ -1012,7 +1012,7 @@ interface LLMHandleInternal {
   model: string;
   client: any;
   gen: (prompt: string) => Promise<string>;
-  genWithTools: (prompt: string, tools: any[]) => Promise<any>;
+  genWithTools: (prompt: string, tools: any[], onToken?: (token: string) => void) => Promise<any>;
   genStream?: (prompt: string) => AsyncGenerator<string, void, unknown>;
   getUsage?(): { total_tokens?: number; totalTokens?: number; prompt_tokens?: number; completion_tokens?: number } | undefined;
 }
@@ -2111,6 +2111,8 @@ async function executeStepCore(ctx: StepExecutionContext): Promise<StepResult> {
       let currentToolCallCount = 0;  // Track tool calls for real-time progress
       const maxIterations = step.maxToolIterations ?? defaultMaxToolIterations;
       let workingPrompt = (stepInstructions ? stepInstructions + "\n\n" : "") + promptWithHistory;
+      // Stream the model's text tokens (including the final answer) during tool turns.
+      const stepOnToken = step.onToken;
       for (let i = 0; i < maxIterations; i++) {
         const llmStart = Date.now();
         let toolPlan: LLMToolResult;
@@ -2118,7 +2120,7 @@ async function executeStepCore(ctx: StepExecutionContext): Promise<StepResult> {
         // Progress updates happen via tool call counter display below
         
         try {
-          toolPlan = await usedLlm.genWithTools(workingPrompt, availableTools);
+          toolPlan = await usedLlm.genWithTools(workingPrompt, availableTools, stepOnToken);
         } catch (e) {
           const provider = classifyProviderFromLlm(usedLlm);
           throw normalizeError(e, 'llm', { stepId: stepIndex, provider });

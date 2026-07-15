@@ -24,7 +24,7 @@ export type LLMToolResult = {
 export type LLMHandle = {
   id: string;
   gen: (prompt: string) => Promise<string>;
-  genWithTools: (prompt: string, tools: ToolDefinition[]) => Promise<LLMToolResult>;
+  genWithTools: (prompt: string, tools: ToolDefinition[], onToken?: (token: string) => void) => Promise<LLMToolResult>;
   genStream: (prompt: string) => AsyncGenerator<string, void, unknown>;
   client: any; // provider-specific client (e.g., OpenAI)
   model: string;
